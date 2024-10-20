@@ -302,7 +302,7 @@ class StoreManager:
             self.model_storage_info[model_name] = {}
             logger.info(f"Registering new {model_name}")
 
-            backend = model_config.get("backend", None)
+            backend = model_config.g et("backend", None)
 
             pretrained_model_name = backend_config.get(
                 "pretrained_model_name_or_path", None

@@ -15,9 +15,11 @@
 #  see the license for the specific language governing permissions and         #
 #  limitations under the license.                                              #
 # ---------------------------------------------------------------------------- #
+import os
 import asyncio
 import logging
 import uuid
+import time
 from typing import Dict, Optional
 
 import ray
@@ -79,6 +81,8 @@ class RoundRobinRouter(SllmRouter):
         self.request_count = 0
         self.request_count_lock = asyncio.Lock()
 
+        self.last_chat_time = 0
+
         self.running = False
         self.running_lock = asyncio.Lock()
 
@@ -113,7 +117,7 @@ class RoundRobinRouter(SllmRouter):
 
         async with self.request_count_lock:
             self.request_count += 1
-
+        
         instance_allocation = self.loop.create_future()
         await self.request_queue.put(instance_allocation)
         logger.info(f"Enqueued request for model {self.model_name}")
@@ -139,6 +143,7 @@ class RoundRobinRouter(SllmRouter):
         else:
             result = {"error": "Invalid action"}
         logger.info(f"Finished processing request")
+        self.last_chat_time = time.time()
         await instance.add_requests(-1)
         async with self.request_count_lock:
             self.request_count -= 1
@@ -195,6 +200,7 @@ class RoundRobinRouter(SllmRouter):
                     await asyncio.sleep(1)
 
     async def _auto_scaler_loop(self):
+        grace_period = int(os.getenv('GRACE_PERIOD', '30'))
         while True:
             # logger.info(f"Auto-scaling for model {self.model_name}")
             async with self.auto_scaling_lock:
@@ -214,8 +220,9 @@ class RoundRobinRouter(SllmRouter):
                 logger.info("Creating new instance")
                 await self._create_instance()
             elif desired_instances < num_running_instances:
-                logger.info("Stopping instance")
-                await self._stop_instance()
+                if num_running_instances > 1 or time.time() - self.last_chat_time >= grace_period:
+                    logger.info("Stopping instance")
+                    await self._stop_instance()
             else:
                 # logger.info("No scaling needed")
                 pass

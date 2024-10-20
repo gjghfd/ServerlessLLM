@@ -17,6 +17,7 @@
 # ---------------------------------------------------------------------------- #
 import logging
 import os
+import re
 import shutil
 from typing import Optional
 import importlib
@@ -97,18 +98,20 @@ class VllmModelDownloader:
         # set the storage path
         storage_path = os.getenv("STORAGE_PATH", "./models")
         model_path = os.path.join(storage_path, "vllm", model_name)
+
+        # Check whether model_path ends with /0, /1, etc. If true, get rid of them
+        pattern = re.compile(r"/\d+")
+        model_path = re.sub(pattern, '', model_path)
+        logger.info(f"model_path after checking is {model_path}")
+
         if os.path.exists(model_path):
             logger.info(f"{model_path} already exists")
             return
 
         try:
             with TemporaryDirectory() as cache_dir:
-                # download from huggingface
-                input_dir = snapshot_download(
-                    model_name,
-                    cache_dir=cache_dir,
-                    allow_patterns=["*.safetensors", "*.bin", "*.json", "*.txt"],
-                )
+                # read from local disk
+                input_dir = os.path.join(storage_path, "sllm", model_name)
                 logger.info(input_dir)
                 # load models from the input directory
                 llm_writer = LLM(

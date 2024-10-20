@@ -24,7 +24,7 @@ set -e
 DEFAULT_RAY_PORT=6379
 DEFAULT_RAY_RESOURCES_HEAD='{"control_node": 1}'
 DEFAULT_RAY_NUM_CPUS=20
-DEFAULT_RAY_HEAD_ADDRESS="ray_head:6379"
+DEFAULT_RAY_HEAD_ADDRESS="$HEAD_IP:6379"
 DEFAULT_STORAGE_PATH="/models"
 
 # Function to initialize the head node
@@ -53,7 +53,7 @@ initialize_worker_node() {
   # Start checkpoint store
   STORAGE_PATH="${STORAGE_PATH:-$DEFAULT_STORAGE_PATH}"
   # TODO: Temporary remove the registration required flag, as registration is not working for vLLM backend
-  CMD="sllm-store-server -storage_path=$STORAGE_PATH -registration_required=true &"
+  CMD="sllm-store-server -storage_path=$STORAGE_PATH -registration_required=true -mem_pool_size=${MEM_POOL_SIZE} -disk_size=${DISK_SIZE} &"
   # CMD="sllm-store-server -storage_path=$STORAGE_PATH &"
   echo "Executing: $CMD"
   eval "$CMD"

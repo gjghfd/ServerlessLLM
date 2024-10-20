@@ -20,7 +20,12 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 #include <unistd.h>
+#include <errno.h>
+#include <regex>
 
 #include <algorithm>
 #include <condition_variable>
@@ -45,10 +50,16 @@ int Model::Initialize(const std::filesystem::path storage_path) {
   model_size_ = 0;
   partition_sizes_.clear();
   partition_paths_.clear();
+
+  // Get rid of suffix digits
+  std::regex pattern("/\\d+");
+  std::string model_path__ = std::regex_replace(model_path_, pattern, "");
+  LOG(INFO) << "Model path " << model_path_ <<  " after replace is " << model_path__;
+
   // Attempt to read from 0 until the file is not found
   for (int partition_id = 0;; ++partition_id) {
     auto tensor_path = storage_path / 
-        model_path_ / ("tensor.data_" + std::to_string(partition_id));
+        model_path__ / ("tensor.data_" + std::to_string(partition_id));
     if (access(tensor_path.c_str(), F_OK) == -1) {
       LOG(INFO) << "Tensor file " << tensor_path << " does not exist";
       break;
@@ -82,28 +93,6 @@ int Model::ToHost(int num_threads) {
     }
   }
 
-  std::vector<int> file_descriptors;
-  // Attempt to read from 0 until the file is not found
-  for (int partition_id = 0; partition_id < partition_sizes_.size();
-       ++partition_id) {
-    auto tensor_path = partition_paths_[partition_id];
-    if (access(tensor_path.c_str(), F_OK) == -1) {
-      LOG(ERROR) << "File " << tensor_path << " does not exist";
-      return -1;
-    }
-
-    // Open file
-    int fd = open(tensor_path.c_str(), O_DIRECT | O_RDONLY);
-    if (fd < 0) {
-      std::string err = "open() failed for file: " + tensor_path.string() +
-                        ", error: " + strerror(errno);
-      LOG(ERROR) << err;
-      return -1;
-    }
-
-    file_descriptors.push_back(fd);
-  }
-
   LOG(INFO) << "Loading model " << model_path_ << " size " << model_size_
             << " to host";
   if (!pinned_mem_ || pinned_mem_->num_chunks() == 0) {
@@ -126,21 +115,29 @@ int Model::ToHost(int num_threads) {
   state_ = MemoryState::LOADING;
   lock.unlock();
 
+  sockaddr_in serverAddress;
+  serverAddress.sin_family = AF_INET;
+  serverAddress.sin_port = htons(8888);
+  auto storage_ip = std::getenv("STORAGE_IP");
+  serverAddress.sin_addr.s_addr = inet_addr(storage_ip);
+
   for (int thread_idx = 0; thread_idx < num_threads; ++thread_idx) {
     futures.emplace_back(std::async(std::launch::async, [&, thread_idx]() {
-      size_t partition_id = 0;
-      size_t file_offset = thread_idx * chunk_per_thread * chunk_size;
-      while (partition_id < partition_sizes_.size() &&
-             file_offset >= partition_sizes_.at(partition_id)) {
-        file_offset -= partition_sizes_.at(partition_id);
-        partition_id += 1;
+      int clientSocket = socket(AF_INET, SOCK_STREAM, 0);
+      int ret = connect(clientSocket, (struct sockaddr*)&serverAddress, sizeof(serverAddress));
+      if (ret == -1) {
+        LOG(ERROR) << "Connect to " << storage_ip << " failed";
+        return -1;
       }
-      if (partition_id >= partition_sizes_.size()) {
-        LOG(INFO) << "Thread " << thread_idx << " early exits";
-        return 0;
-      }
-      LOG(INFO) << "Thread " << thread_idx << " starting from partition "
-                << partition_id << " offset " << file_offset;
+
+      
+      char *send_buffer = (char *) malloc(8);
+      *((int *) send_buffer) = thread_idx;        // 4 bytes signed
+      *((int *) (send_buffer + 4)) = num_threads; // 4 bytes signed
+      send(clientSocket, send_buffer, 8, 0);
+      send(clientSocket, model_path_.c_str(), strlen(model_path_.c_str()), 0);
+      free(send_buffer);
+
       for (size_t chunk_idx = thread_idx * chunk_per_thread;
            chunk_idx < (thread_idx + 1) * chunk_per_thread &&
            chunk_idx < num_chunks;
@@ -158,38 +155,17 @@ int Model::ToHost(int num_threads) {
           return 0;
         }
 
-        int fd = file_descriptors[partition_id];
-        ssize_t ret =
-            pread(fd, (void*)host_buffers[chunk_idx], size, file_offset);
-        if (ret < 0) {
-          auto tensor_path = partition_paths_[partition_id];
-          LOG(ERROR) << "pread() failed for file: " << tensor_path
-                     << ", error: " << strerror(errno);
-          return -1;
-        } else if (ret != size) {
-          if (ret < size && partition_id + 1 < file_descriptors.size()) {
-            partition_id += 1;
-            file_offset = 0;
-            size_t remaining_size = size - ret;
-            int fd = file_descriptors[partition_id];
-            ret = pread(fd, (void*)(host_buffers[chunk_idx] + ret),
-                        remaining_size, file_offset);
-            if (ret != remaining_size) {
-              auto tensor_path = partition_paths_[partition_id];
-              LOG(ERROR) << "Failed to read file: " << tensor_path
-                         << " read: " << ret << " expected: " << remaining_size;
+        size_t cur_recv = recv(clientSocket, (void*)host_buffers[chunk_idx], size, 0);
+        while (cur_recv < size) {
+            size_t new_recv = recv(clientSocket, (void*)(host_buffers[chunk_idx] + cur_recv), size - cur_recv, 0);
+            if (new_recv == 0) {
+              LOG(ERROR) << "Opponent closed connection";
               return -1;
             }
-          } else {
-            auto tensor_path = partition_paths_[partition_id];
-            LOG(ERROR) << "Failed to read file: " << tensor_path
-                       << " read: " << ret << " expected: " << size;
-            return -1;
-          }
+            cur_recv += new_recv;
         }
-        file_offset += ret;
-
         host_ptr_vector_->enqueue(chunk_idx, Batch{chunk_idx, size});
+        // clientSocket.close();
       }
 
       return 0;
@@ -203,11 +179,6 @@ int Model::ToHost(int num_threads) {
       LOG(ERROR) << "Error reading from disk, ret " << ret;
       error = true;
     }
-  }
-
-  // close file
-  for (int fd : file_descriptors) {
-    close(fd);
   }
 
   lock.lock();
