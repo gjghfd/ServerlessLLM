@@ -38,7 +38,7 @@ from serverless_llm.serve.backends.backend_utils import (
 logger = logging.getLogger("ray")
 
 
-def process_output(output: RequestOutput, model_name: str) -> Dict[str, Any]:
+def process_output(output: RequestOutput, model_name: str, first_token_returned_time: float) -> Dict[str, Any]:
     choices: List[Dict[str, Any]] = [
         {
             "index": idx,
@@ -55,11 +55,12 @@ def process_output(output: RequestOutput, model_name: str) -> Dict[str, Any]:
     api_response = {
         "id": output.request_id,
         "object": "chat.completion",
-        "created": (
-            int(time.time())
-            if output.metrics is None
-            else output.metrics.arrival_time
-        ),
+        # "created": (
+        #     int(time.time())
+        #     if output.metrics is None
+        #     else output.metrics.arrival_time
+        # ),
+        "created": first_token_returned_time,
         "model": model_name,
         "choices": choices,
         "usage": {
@@ -143,8 +144,9 @@ class VllmBackend(SllmBackend):
             filtered_engine_config["model"] = model_path
             filtered_engine_config["load_format"] = "serverless_llm"
 
-        # NOTE: Automatic enable prefix cachinging
-        filtered_engine_config["enable_prefix_caching"] = True
+        # NOTE: Do not enable prefix caching
+        filtered_engine_config["enable_prefix_caching"] = False
+        filtered_engine_config["enforce_eager"] = True
 
         logger.info(
             f"Creating new VLLM engine with config: {filtered_engine_config}"
@@ -210,8 +212,11 @@ class VllmBackend(SllmBackend):
         # TODO stream results
 
         # Non-stream case
+        first_token_returned_time = 0
         final_output = None
         async for response_output in results_generator:
+            if first_token_returned_time == 0:
+                first_token_returned_time = time.time()
             final_output = response_output
             await self.request_trace.update_status(request_id, response_output)
 
@@ -220,7 +225,7 @@ class VllmBackend(SllmBackend):
         if not self.trace_debug:
             await self.request_trace.delete_request(request_id)
 
-        return process_output(final_output, model_name)
+        return process_output(final_output, model_name, first_token_returned_time)
 
     async def shutdown(self):
         """Abort all requests and shutdown the backend."""

@@ -54,7 +54,7 @@ async def auto_scaler(
     return desired_instances
 
 
-@ray.remote(num_cpus=1, resources={"control_node": 0.1})
+@ray.remote(num_cpus=1, resources={"control_node": 0.001})
 class RoundRobinRouter(SllmRouter):
     def __init__(
         self,

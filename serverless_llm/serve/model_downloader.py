@@ -101,12 +101,16 @@ class VllmModelDownloader:
 
         # Check whether model_path ends with /0, /1, etc. If true, get rid of them
         pattern = re.compile(r"/\d+")
-        model_path = re.sub(pattern, '', model_path)
-        logger.info(f"model_path after checking is {model_path}")
+        model_path_ = re.sub(pattern, '', model_path)
+        logger.info(f"model_path after checking is {model_path_}")
 
-        if os.path.exists(model_path):
-            logger.info(f"{model_path} already exists")
+        if os.path.exists(model_path_):
+            logger.info(f"{model_path_} already exists")
+            if model_path_ != model_path and not os.path.exists(model_path):
+                os.symlink(model_path_, model_path, target_is_directory=True)
             return
+        
+        model_path = model_path_
 
         try:
             with TemporaryDirectory() as cache_dir:

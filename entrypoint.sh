@@ -23,7 +23,7 @@ set -e
 # Default values
 DEFAULT_RAY_PORT=6379
 DEFAULT_RAY_RESOURCES_HEAD='{"control_node": 1}'
-DEFAULT_RAY_NUM_CPUS=20
+DEFAULT_RAY_NUM_CPUS=$NUM_CPU
 DEFAULT_RAY_HEAD_ADDRESS="$HEAD_IP:6379"
 DEFAULT_STORAGE_PATH="/models"
 
@@ -76,8 +76,27 @@ initialize_worker_node() {
   eval "$CMD"
 }
 
+# Function to initialize the worker node
+initialize_storage_node() {
+  echo "Initializing storage node..."
+
+  # Start the worker
+  RAY_HEAD_ADDRESS="${RAY_HEAD_ADDRESS:-$DEFAULT_RAY_HEAD_ADDRESS}"
+
+  RAY_RESOURCES='{"control_node": 1}'
+  
+  # Construct the command
+  CMD="ray start --address=$RAY_HEAD_ADDRESS --resources='$RAY_RESOURCES' --num_cpus=$NUM_CPU --block"
+
+  # Display and execute the command
+  echo "Executing: $CMD"
+  eval "$CMD"
+}
+
 # Determine the node type and call the appropriate initialization function
-if [ "$NODE_TYPE" == "HEAD" ]; then
+if [ "$STORAGE_SERVER" == "1" ]; then
+  initialize_storage_node
+elif [ "$NODE_TYPE" == "HEAD" ]; then
   initialize_head_node
 elif [ "$NODE_TYPE" == "WORKER" ]; then
   initialize_worker_node
