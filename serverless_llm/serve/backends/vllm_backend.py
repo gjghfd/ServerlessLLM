@@ -147,6 +147,7 @@ class VllmBackend(SllmBackend):
         # NOTE: Do not enable prefix caching
         filtered_engine_config["enable_prefix_caching"] = False
         filtered_engine_config["enforce_eager"] = True
+        filtered_engine_config["max_num_seqs"] = 16
 
         logger.info(
             f"Creating new VLLM engine with config: {filtered_engine_config}"

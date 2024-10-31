@@ -86,7 +86,7 @@ initialize_storage_node() {
   RAY_RESOURCES='{"control_node": 1}'
   
   # Construct the command
-  CMD="ray start --address=$RAY_HEAD_ADDRESS --resources='$RAY_RESOURCES' --num_cpus=$NUM_CPU --block"
+  CMD="ray start --address=$RAY_HEAD_ADDRESS --resources='$RAY_RESOURCES' --num-cpus=$NUM_CPU --block"
 
   # Display and execute the command
   echo "Executing: $CMD"

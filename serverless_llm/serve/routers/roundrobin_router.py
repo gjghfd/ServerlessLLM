@@ -220,9 +220,9 @@ class RoundRobinRouter(SllmRouter):
                 logger.info("Creating new instance")
                 await self._create_instance()
             elif desired_instances < num_running_instances:
-                if num_running_instances > 1 or time.time() - self.last_chat_time >= grace_period:
-                    logger.info("Stopping instance")
-                    await self._stop_instance()
+                # if num_running_instances > 1 or time.time() - self.last_chat_time >= grace_period:
+                logger.info("Stopping instance")
+                await self._stop_instance()
             else:
                 # logger.info("No scaling needed")
                 pass

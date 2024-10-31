@@ -341,12 +341,13 @@ class StoreManager:
             logger.info(
                 f"Downloading model {pretrained_model_name} to nodes {target_nodes}"
             )
-            for node_id in target_nodes:
+
+            async def download_model(node_id):
                 if backend == "transformers":
                     hf_model_class = backend_config.get("hf_model_class", None)
                     if hf_model_class is None:
                         logger.error("hf_model_type not specified in backend_config.")
-                        break
+                        return 0
                     await self.download_transformers_model(
                         pretrained_model_name, node_id, hf_model_class
                     )
@@ -359,7 +360,7 @@ class StoreManager:
                     )
                 else:
                     logger.error(f"Backend {backend} not supported")
-                    break
+                    return 0
                 local_server = self.local_servers[node_id]
                 model_size = await local_server.register_model(
                     model_name, backend, backend_config
@@ -367,7 +368,14 @@ class StoreManager:
                 # record the storage info
                 self.model_storage_info[model_name][node_id] = True
                 logger.info(f"{model_name} downloaded to node {node_id}")
-            self.model_info[model_name] = model_size
+                return model_size
+
+            tasks = []
+            for node_id in target_nodes:
+                tasks.append(asyncio.create_task(download_model(node_id)))
+            self.model_info[model_name] = await tasks[0]
+            for index in range(1, len(tasks)):
+                await tasks[index]
             logger.info(f"{model_name} registered")
         else:
             # TOOD: apply new placement config, if given
