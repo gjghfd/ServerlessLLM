@@ -115,15 +115,19 @@ int Model::ToHost(int num_threads) {
   state_ = MemoryState::LOADING;
   lock.unlock();
 
-  sockaddr_in serverAddress;
-  serverAddress.sin_family = AF_INET;
-  serverAddress.sin_port = htons(8888);
+  auto num_storage = atoi(std::getenv("NUM_STORAGE"));
   auto storage_ip = std::getenv("STORAGE_IP");
-  serverAddress.sin_addr.s_addr = inet_addr(storage_ip);
+  char *storage_ip_2 = NULL;
+  if (num_storage == 2) storage_ip_2 = std::getenv("STORAGE_IP_2");
 
   for (int thread_idx = 0; thread_idx < num_threads; ++thread_idx) {
     futures.emplace_back(std::async(std::launch::async, [&, thread_idx]() {
       int clientSocket = socket(AF_INET, SOCK_STREAM, 0);
+      sockaddr_in serverAddress;
+      serverAddress.sin_family = AF_INET;
+      serverAddress.sin_port = htons(8888);
+      serverAddress.sin_addr.s_addr = inet_addr((num_storage == 2 && thread_idx >= num_threads / 2) ? storage_ip_2 : storage_ip);
+
       int ret = connect(clientSocket, (struct sockaddr*)&serverAddress, sizeof(serverAddress));
       if (ret == -1) {
         LOG(ERROR) << "Connect to " << storage_ip << " failed";

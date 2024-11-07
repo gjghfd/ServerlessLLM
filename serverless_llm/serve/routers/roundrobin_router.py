@@ -242,6 +242,7 @@ class RoundRobinRouter(SllmRouter):
         return instance_id
 
     async def _start_instance(self, instance_id):
+        stime = time.time()
         async with self.instance_management_lock:
             if instance_id not in self.starting_instances:
                 logger.error(f"Instance {instance_id} not found")
@@ -279,10 +280,20 @@ class RoundRobinRouter(SllmRouter):
         async with instance.lock:
             instance.ready = True
             instance.node_id = startup_node
+        
+        etime = time.time()
+        logger.error(f"init instance time cost = {etime - stime} seconds")
+        print(f"init instance time cost = {etime - stime} seconds")
+
         await instance.backend_instance.init_backend.remote()
         async with self.instance_management_lock:
             self.ready_instances[instance_id] = instance
             self.starting_instances.pop(instance_id)
+        
+        etime_1 = time.time()
+        logger.error(f"init backend time cost = {etime_1 - etime} seconds")
+        print(f"init backend time cost = {etime_1 - etime} seconds")
+
         return instance_id
 
     async def _stop_instance(self, instance_id: Optional[str] = None):

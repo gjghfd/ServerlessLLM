@@ -17,6 +17,7 @@
 # ---------------------------------------------------------------------------- #
 from contextlib import asynccontextmanager
 
+import time
 import ray
 import ray.exceptions
 from fastapi import FastAPI, HTTPException, Request
@@ -120,7 +121,11 @@ def create_app() -> FastAPI:
 
     @app.post("/v1/chat/completions")
     async def generate_handler(request: Request):
-        return await inference_handler(request, "generate")
+        stime = time.time()
+        ret = await inference_handler(request, "generate")
+        if ret["created"] is not None:
+            ret["created"] = ret["created"] - stime
+        return ret
 
     @app.post("/v1/embeddings")
     async def embeddings_handler(request: Request):
