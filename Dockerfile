@@ -60,6 +60,8 @@ COPY examples examples
 COPY README.md /app/
 RUN pip install .
 
+COPY llama2.jinja /app/llama2.jinja
+
 COPY entrypoint.sh .
 RUN chmod +x entrypoint.sh
 

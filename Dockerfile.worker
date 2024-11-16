@@ -66,6 +66,8 @@ RUN pip install .[worker]
 
 COPY serverless_llm/store/vllm_patch/sllm_load.patch /app/serverless_llm/store/vllm_patch/sllm_load.patch
 
+COPY llama2.jinja /app/llama2.jinja
+
 COPY entrypoint.sh .
 RUN chmod +x entrypoint.sh
 

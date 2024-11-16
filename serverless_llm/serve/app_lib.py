@@ -123,7 +123,9 @@ def create_app() -> FastAPI:
     async def generate_handler(request: Request):
         stime = time.time()
         ret = await inference_handler(request, "generate")
-        if ret["created"] is not None:
+        if "created" not in ret:
+            logger.error(f"Error: No Token Response! Ret = {ret}")
+        elif ret["created"] is not None:
             ret["created"] = ret["created"] - stime
         return ret
 

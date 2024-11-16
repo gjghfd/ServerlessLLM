@@ -147,13 +147,14 @@ class VllmBackend(SllmBackend):
         # NOTE: Do not enable prefix caching
         filtered_engine_config["enable_prefix_caching"] = False
         filtered_engine_config["enforce_eager"] = True
-        filtered_engine_config["max_num_seqs"] = 16
+        filtered_engine_config["max_num_seqs"] = int(os.getenv("BATCH_SIZE", "8"))
 
         logger.info(
             f"Creating new VLLM engine with config: {filtered_engine_config}"
         )
 
         self.engine_args = AsyncEngineArgs(**filtered_engine_config)
+        self.model_path = filtered_engine_config["model"]
 
         self.engine = None
 
@@ -162,6 +163,24 @@ class VllmBackend(SllmBackend):
             if self.status != BackendStatus.UNINITIALIZED:
                 return
             self.engine = AsyncLLMEngine.from_engine_args(self.engine_args)
+            
+            self.tokenizer = self.engine.engine.tokenizer.tokenizer
+            if "Llama-2" in self.model_path:
+                chat_template = "/app/llama2.jinja"
+                try:
+                    with open(chat_template, "r") as f:
+                        self.tokenizer.chat_template = f.read()
+                except OSError as e:
+                    JINJA_CHARS = "{}\n"
+                    if not any(c in chat_template for c in JINJA_CHARS):
+                        msg = (f"The supplied chat template ({chat_template}) "
+                            f"looks like a file path, but it failed to be "
+                            f"opened. Reason: {e}")
+                        raise ValueError(msg) from e
+
+                logger.info("Using supplied chat template:\n%s",
+                            self.tokenizer.chat_template)
+
             self.status = BackendStatus.RUNNING
 
     async def generate(self, request_data: Dict[str, Any]):
@@ -176,13 +195,20 @@ class VllmBackend(SllmBackend):
 
         model_name: str = request_data.get("model_name", "vllm-model")
         messages: Dict[Dict[str, str], str] = request_data.get("messages", [])
-        construct_prompt: str = "\n".join(
-            [
-                f"{message['role']}: {message['content']}"
-                for message in messages
-                if "content" in message
-            ]
+
+        construct_prompt: str = self.tokenizer.apply_chat_template(
+            conversation=messages,
+            tokenize=False,
+            add_generation_prompt=True,
         )
+
+        # construct_prompt: str = "\n".join(
+        #     [
+        #         f"{message['role']}: {message['content']}"
+        #         for message in messages
+        #         if "content" in message
+        #     ]
+        # )
 
         # If prompt is not provided, construct it from messages
         inputs: Union[str, TokensPrompt] = request_data.get(

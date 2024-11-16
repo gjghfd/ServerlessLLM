@@ -131,6 +131,8 @@ int Model::ToHost(int num_threads) {
       int ret = connect(clientSocket, (struct sockaddr*)&serverAddress, sizeof(serverAddress));
       if (ret == -1) {
         LOG(ERROR) << "Connect to " << storage_ip << " failed";
+        LOG(ERROR) << "num_storage:" << num_storage;
+        LOG(ERROR) << "thread_idx:" << thread_idx;
         return -1;
       }
 
