@@ -147,7 +147,7 @@ class VllmBackend(SllmBackend):
         # NOTE: Do not enable prefix caching
         filtered_engine_config["enable_prefix_caching"] = False
         filtered_engine_config["enforce_eager"] = True
-        filtered_engine_config["max_num_seqs"] = int(os.getenv("BATCH_SIZE", "8"))
+        # filtered_engine_config["max_num_seqs"] = int(os.getenv("BATCH_SIZE", "8"))
 
         logger.info(
             f"Creating new VLLM engine with config: {filtered_engine_config}"

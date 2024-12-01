@@ -126,7 +126,9 @@ def create_app() -> FastAPI:
         if "created" not in ret:
             logger.error(f"Error: No Token Response! Ret = {ret}")
         elif ret["created"] is not None:
-            ret["created"] = ret["created"] - stime
+            first_token_time = ret["created"]
+            ret["created"] = time.time() - first_token_time
+            logger.error(f"Generation TTFT = {first_token_time - stime}, Total Time = {ret['created'] + first_token_time - stime}")
         return ret
 
     @app.post("/v1/embeddings")

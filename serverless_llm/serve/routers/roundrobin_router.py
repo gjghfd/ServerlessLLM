@@ -86,8 +86,11 @@ class RoundRobinRouter(SllmRouter):
         self.running = False
         self.running_lock = asyncio.Lock()
 
+        self.batch_size = int(os.getenv("BATCH_SIZE", "8"))
+
         self.auto_scaler = None
-        logger.info(f"Created new handler for model {self.model_name}")
+        logger.error(f"Created new handler for model {self.model_name} with bs = {self.batch_size}")
+        print(f"Created new handler for model {self.model_name} with bs = {self.batch_size}")
 
     async def start(self, auto_scaling_config: Dict[str, int]):
         self.model_loading_scheduler = ray.get_actor("model_loading_scheduler")
@@ -120,10 +123,10 @@ class RoundRobinRouter(SllmRouter):
         
         instance_allocation = self.loop.create_future()
         await self.request_queue.put(instance_allocation)
-        logger.info(f"Enqueued request for model {self.model_name}")
+        logger.error(f"Enqueued request for model {self.model_name}")
 
         instance_id = await instance_allocation
-        logger.info(f"{request_data}, type: {type(request_data)}")
+        logger.error(f"{request_data}, type: {type(request_data)}")
         async with self.instance_management_lock:
             if instance_id not in self.ready_instances:
                 logger.error(f"Instance {instance_id} not found")
@@ -145,6 +148,8 @@ class RoundRobinRouter(SllmRouter):
         logger.info(f"Finished processing request")
         self.last_chat_time = time.time()
         await instance.add_requests(-1)
+        logger.error(f"Instance {instance.instance_id} remove a request, current queue length={instance.queue_length}")
+        print(f"Instance {instance.instance_id} remove a request, current queue length={instance.queue_length}")
         async with self.request_count_lock:
             self.request_count -= 1
         return result
@@ -174,7 +179,7 @@ class RoundRobinRouter(SllmRouter):
         while True:
             instance_allocation = await self.request_queue.get()
             allocated = False
-            logger.info(f"A request is waiting for model {self.model_name}")
+            logger.error(f"A request is waiting for model {self.model_name}")
             while not allocated:
                 # 1. get ready instances
                 instance_options = None
@@ -182,8 +187,8 @@ class RoundRobinRouter(SllmRouter):
                     await asyncio.sleep(1)
                     async with self.instance_management_lock:
                         instance_options = list(self.ready_instances.keys())
-                    logger.info(f"{instance_options}")
-                logger.info(f"Got ready instances {instance_options}")
+                    logger.error(f"{instance_options}")
+                logger.error(f"Got ready instances {instance_options}")
                 instance_id = instance_options[
                     round_robin_index % len(instance_options)
                 ]
@@ -195,6 +200,8 @@ class RoundRobinRouter(SllmRouter):
                     allocated = await instance.add_requests(1)
                     if allocated:
                         instance_allocation.set_result(instance_id)
+                        logger.error(f"Instance {instance_id} add a request, current queue length={instance.queue_length}")
+                        print(f"Instance {instance_id} add a request, current queue length={instance.queue_length}")
 
                 if not allocated:
                     await asyncio.sleep(1)
@@ -234,7 +241,7 @@ class RoundRobinRouter(SllmRouter):
             f"Creating new instance {instance_id} for model {self.model_name}"
         )
         # TODO: Add max_queue_length to instance
-        instance = InstanceHandle(instance_id=instance_id, max_queue_length=10)
+        instance = InstanceHandle(instance_id=instance_id, max_queue_length=self.batch_size)
         async with self.instance_management_lock:
             self.starting_instances[instance_id] = instance
         self.loop.create_task(self._start_instance(instance_id))
@@ -273,9 +280,10 @@ class RoundRobinRouter(SllmRouter):
                 f"worker_id_{startup_node}": 0.1,
             }
         ).remote(instance_id, self.backend, self.backend_config, startup_config)
-        logger.info(
-            f"Started instance {instance_id} for model {self.model_name}"
+        logger.error(
+            f"for model {self.model_name} started instance {instance_id}"
         )
+        print(f"for model {self.model_name} started instance {instance_id}")
         instance.backend_instance = ray.get_actor(instance_id)
         async with instance.lock:
             instance.ready = True
