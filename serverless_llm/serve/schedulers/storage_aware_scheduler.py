@@ -138,9 +138,11 @@ class StorageAwareScheduler(FcfsScheduler):
                             f"Sorted scheduling options: {scheduling_options}"
                         )
                         node_id, _ = scheduling_options[0]
+                        logger.info(f"Start to acquired queue_lock")
                         async with self.queue_lock:
+                            logger.info(f"Acquired queue_lock")
                             self.model_loading_queues[model_name].pop(idx)
-                            allocation_result.set_result(node_id)
+                        allocation_result.set_result(node_id)
                         logger.info(
                             f"Allocated node {node_id} for model {model_name}"
                         )
@@ -153,4 +155,6 @@ class StorageAwareScheduler(FcfsScheduler):
                         logger.info(f"No available node for model {model_name}")
                 await self._update_worker_nodes(worker_nodes)
 
+            # logger.info(f"Waiting for sleep")
             await asyncio.sleep(1)
+            # logger.info(f"Quit sleep")

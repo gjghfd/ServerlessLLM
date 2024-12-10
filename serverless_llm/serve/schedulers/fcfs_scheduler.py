@@ -51,9 +51,30 @@ class FcfsScheduler(SllmScheduler):
                 return
             self.running = True
         logger.info("Starting FCFS scheduler")
-        self.loop_task = self.loop.create_task(self._control_loop())
+        self.loop_task_unshilded = self.loop.create_task(self._control_loop())
+        def callback(task):
+            print("control_loop exited unexpectedly.")
+            logger.error("control_loop exited unexpectedly.")
+            print(f"task = {task}")
+
+            exception = None
+            try:
+                return_value = task.result()
+                raise AssertionError(
+                    f"The engine background task should never finish without an "
+                    f"exception. {return_value}")
+            except asyncio.exceptions.CancelledError:
+                # We assume that if the task is cancelled, we are gracefully shutting
+                # down. This should only happen on program exit.
+                logger.info("Engine is gracefully shutting down.")
+            except Exception as e:
+                exception = e
+                logger.error("Engine background task failed", exc_info=e)
+        self.loop_task_unshilded.add_done_callback(callback)
+        self.loop_task = asyncio.shield(self.loop_task_unshilded)
 
     async def shutdown(self) -> None:
+        logger.error("Error: Shutdown fcfs scheduler")
         async with self.running_lock:
             if not self.running:
                 logger.error("FCFS scheduler not running")
@@ -92,57 +113,61 @@ class FcfsScheduler(SllmScheduler):
 
     async def _control_loop(self):
         logger.info("Starting control loop")
-        while self.running:
-            loading_requests = []
-            async with self.queue_lock:
-                for (
-                    model_name,
-                    loading_queue,
-                ) in self.model_loading_queues.items():
-                    for idx, (
+        try:
+            while self.running:
+                loading_requests = []
+                async with self.queue_lock:
+                    for (
+                        model_name,
+                        loading_queue,
+                    ) in self.model_loading_queues.items():
+                        for idx, (
+                            request_time,
+                            num_gpus,
+                            allocation_result,
+                        ) in enumerate(loading_queue):
+                            loading_requests.append(
+                                (
+                                    model_name,
+                                    idx,
+                                    request_time,
+                                    num_gpus,
+                                    allocation_result,
+                                )
+                            )
+                # logger.info(f"Loading requests: {loading_requests}")
+                # first come first serve
+                if len(loading_requests) > 0:
+                    worker_nodes = await self._get_worker_nodes()
+                    logger.info(f"Worker nodes: {worker_nodes}")
+                    loading_requests.sort(key=lambda x: x[1])
+                    for (
+                        model_name,
+                        idx,
                         request_time,
                         num_gpus,
                         allocation_result,
-                    ) in enumerate(loading_queue):
-                        loading_requests.append(
-                            (
-                                model_name,
-                                idx,
-                                request_time,
-                                num_gpus,
-                                allocation_result,
-                            )
-                        )
-            # logger.info(f"Loading requests: {loading_requests}")
-            # first come first serve
-            if len(loading_requests) > 0:
-                worker_nodes = await self._get_worker_nodes()
-                logger.info(f"Worker nodes: {worker_nodes}")
-                loading_requests.sort(key=lambda x: x[1])
-                for (
-                    model_name,
-                    idx,
-                    request_time,
-                    num_gpus,
-                    allocation_result,
-                ) in loading_requests:
-                    allocated = False
-                    for node_id, node_info in worker_nodes.items():
-                        if node_info["free_gpu"] >= num_gpus:
-                            async with self.queue_lock:
-                                self.model_loading_queues[model_name].pop(idx)
-                                allocation_result.set_result(node_id)
-                            allocated = True
-                            logger.info(
-                                f"Allocated node {node_id} for model {model_name}"
-                            )
-                            node_info["free_gpu"] -= num_gpus
-                            break
-                    if not allocated:
-                        logger.info(f"No available node for model {model_name}")
-                await self._update_worker_nodes(worker_nodes)
+                    ) in loading_requests:
+                        allocated = False
+                        for node_id, node_info in worker_nodes.items():
+                            if node_info["free_gpu"] >= num_gpus:
+                                async with self.queue_lock:
+                                    self.model_loading_queues[model_name].pop(idx)
+                                    allocation_result.set_result(node_id)
+                                allocated = True
+                                logger.info(
+                                    f"Allocated node {node_id} for model {model_name}"
+                                )
+                                node_info["free_gpu"] -= num_gpus
+                                break
+                        if not allocated:
+                            logger.info(f"No available node for model {model_name}")
+                    await self._update_worker_nodes(worker_nodes)
 
-            await asyncio.sleep(1)
+                await asyncio.sleep(1)
+        except Exception as e:
+            print(f"Error: control_loop meet exception: {e}")
+            logger.error(f"Error: control_loop meet exception: {e}")
 
     async def _get_worker_nodes(self):
         worker_nodes = get_worker_nodes()
